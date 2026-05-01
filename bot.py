@@ -2,6 +2,7 @@
 import logging
 import os
 import random
+import psutil
 import re
 from datetime import datetime, timedelta
 
@@ -15,11 +16,178 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# === РУССКИЕ КОМАНДЫ БЕЗ / ===
+def get_mentioned_or_replied(update: Update) -> list[str]:
+    msg = update.message
+    if not msg:
+        return []
+    mentioned = get_mentioned_users(msg.text)
+    if mentioned:
+        return mentioned
+    if msg.reply_to_message and msg.reply_to_message.from_user:
+        user = msg.reply_to_message.from_user
+        return [user.username or str(user.id)]
+    return []
+
+async def handle_ru_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.message
+    if not msg or not msg.text:
+        return
+    text = msg.text.strip().lower()
+    user = msg.from_user
+    if not user:
+        return
+
+    # === КОМАНДЫ МОПСА ===
+    if text in ['привет', 'приветики', 'хау', 'здорово', 'hi', 'hello']:
+        await mops_greet(update, context)
+        return
+    if text in ['пока', 'бай', 'до свидания', 'goodbye']:
+        await mops_farewell(update, context)
+        return
+    if text in ['спасибо', 'благодарю', 'thx', 'thanks']:
+        await mops_thanks(update, context)
+        return
+    if text in ['шутка', 'анекдот', 'рассмеши']:
+        await mops_joke(update, context)
+        return
+    if text in ['цитата', 'quote']:
+        await mops_quote(update, context)
+        return
+    if text in ['факт', 'интересное', 'инфа']:
+        await mops_fact(update, context)
+        return
+    if text in ['комплимент', 'похвали']:
+        await mops_compliment(update, context)
+        return
+    if text in ['оскорбление', 'поругай']:
+        await mops_insult(update, context)
+        return
+    if text in ['шар', 'ball', 'спрошу']:
+        await mops_8ball(update, context)
+        return
+    if text in ['монетка', 'орел', 'решка']:
+        await mops_coin(update, context)
+        return
+    if text in ['кубик', 'бросить']:
+        await mops_dice(update, context)
+        return
+    if text in ['число', 'рандом', 'рандомное']:
+        await mops_random(update, context)
+        return
+    if text in ['гороскоп', 'зодиак']:
+        await mops_horoscope(update, context)
+        return
+    if text in ['погода', 'погодка']:
+        await mops_weather(update, context)
+        return
+    if text in ['помощь', 'help', 'команды', 'что ты умеешь']:
+        await mops_fardelka_help(update, context)
+        return
+
+    # === ИГРОВЫЕ КОМАНДЫ ===
+    game_commands = {
+        'дуэль': duel, 'брак': brak, 'свадьба': brak,
+        'развод': razvod, 'расставание': razvod,
+        'альянс': alyans, 'союз': alyans,
+        'враги': vragi, 'война': war,
+        'принять': accept, 'согласен': accept,
+        'отклонить': decline, 'отказ': decline,
+        'выстрел': shot, 'стрель': shot,
+        'баланс': balance, 'монеты': balance,
+        'магазин': shop, 'кольца': rings,
+        'моикольца': my_rings, 'кольцо': ring_exchange,
+        'браки': braki, 'семьи': braki, 'союзы': soyuzy,
+        'мойбрак': moisoyuz, 'моясемья': moisoyuz,
+        'пвп': pvpstats, 'пвптоп': pvptop,
+        'войнытоп': wartop, 'рейд': raid_start,
+        'удар': raid_hit, 'слова': words_start,
+        'стопслова': words_stop,
+        'мопс': mops_status, 'мопсон': mops_on,
+        'мопсофф': mops_off,
+        'ежедневка': daily, 'награда': daily,
+    }
+
+    if text in game_commands:
+        func = game_commands[text]
+        no_args = ['принять', 'согласен', 'отклонить', 'отказ', 'выстрел', 'стрель', 
+                   'баланс', 'монеты', 'магазин', 'кольца', 'моикольца', 'браки', 'семьи', 'союзы',
+                   'мойбрак', 'моясемья', 'пвптоп', 'войнытоп', 'рейд',
+                   'удар', 'слова', 'стопслова', 'мопс', 'ежедневка', 'награда']
+
+        if text in no_args:
+            await func(update, context)
+            return
+
+        mentioned = get_mentioned_or_replied(update)
+        if not mentioned:
+            await msg.reply_text(f"Напиши: {text} @user")
+            return
+
+        context.args = mentioned
+        await func(update, context)
+        return
+
+    # Команды с аргументами
+    for cmd in ['дуэль ', 'брак ', 'свадьба ', 'развод ', 'расставание ', 'альянс ', 'союз ', 
+                'враги ', 'война ', 'кольцо ', 'купить ', 'пвп ', 'кто ', 'поцелуй ', 'обнять ']:
+        if text.startswith(cmd):
+            rest = msg.text.strip()[len(cmd):].strip()
+            if rest:
+                mentioned = list(dict.fromkeys(re.findall(r'@(\w+)', rest)))
+            else:
+                mentioned = get_mentioned_or_replied(update)
+
+            if not mentioned and cmd.strip() not in ['купить']:
+                await msg.reply_text(f"{cmd.strip()} @user")
+                return
+
+            cmd_stripped = cmd.strip()
+            if cmd_stripped == 'дуэль':
+                context.args = mentioned
+                await duel(update, context)
+            elif cmd_stripped in ['брак', 'свадьба']:
+                context.args = mentioned
+                await brak(update, context)
+            elif cmd_stripped in ['развод', 'расставание']:
+                context.args = mentioned
+                await razvod(update, context)
+            elif cmd_stripped in ['альянс', 'союз']:
+                context.args = mentioned
+                await alyans(update, context)
+            elif cmd_stripped == 'враги':
+                context.args = mentioned
+                await vragi(update, context)
+            elif cmd_stripped == 'война':
+                context.args = mentioned
+                await war(update, context)
+            elif cmd_stripped == 'кольцо':
+                context.args = mentioned
+                await ring_exchange(update, context)
+            elif cmd_stripped == 'купить':
+                context.args = [rest]
+                await buy(update, context)
+            elif cmd_stripped == 'пвп':
+                context.args = mentioned
+                await pvpstats(update, context)
+            elif cmd_stripped == 'кто':
+                context.args = mentioned
+                await mops_love(update, context)
+            elif cmd_stripped == 'поцелуй':
+                context.args = mentioned
+                await mops_kiss(update, context)
+            elif cmd_stripped == 'обнять':
+                context.args = mentioned
+                await mops_hug(update, context)
+            return
+
+
+
 def _fix_mojibake(text: str) -> str:
     if not isinstance(text, str) or not text:
         return text
     try:
-        # Fix strings like "РџСЂРёРІРµС‚" -> "Привет"
+        # Fix strings like "ПСЂёвет" -> "Привет"
         candidate = text.encode("cp1251").decode("utf-8")
     except Exception:
         return text
@@ -255,11 +423,11 @@ def find_active_duel_for_user(chat_id: str, user: str) -> tuple[str, dict[str, s
 
 
 def normalize_word(word: str) -> str:
-    return re.sub(r"[^a-zA-ZР°-СЏРђ-РЇС‘РЃ]", "", word).lower().replace("С‘", "Рµ")
+    return re.sub(r"[^a-zA-Zа-яА-ЯС‘РЃ]", "", word).lower().replace("С‘", "е")
 
 
 def get_last_letter(word: str) -> str:
-    skip = {"СЊ", "СЉ", "С‹"}
+    skip = {"ь", "СЉ", "ы"}
     for ch in reversed(word):
         if ch not in skip:
             return ch
@@ -495,7 +663,7 @@ async def razvod(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     mentioned = get_mentioned_users(msg.text)
 
     if chat_id not in marriages:
-        await msg.reply_text("РќРµС‚ Р±СЂР°РєРѕРІ")
+        await msg.reply_text("Рќет бСЂаков")
         return
 
     if mentioned:
@@ -504,9 +672,9 @@ async def razvod(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if m.get("type") == "marriage" and target in m.get("members", []):
                 marriages[chat_id].remove(m)
                 save_json(DATA_FILE, marriages)
-                await msg.reply_text(f"@{target} СЂР°Р·РІРµРґРµРЅ(Р°)")
+                await msg.reply_text(f"@{target} СЂазведен(а)")
                 return
-        await msg.reply_text("РќРµ РЅР°Р№РґРµРЅРѕ")
+        await msg.reply_text("Рќе найдено")
         return
 
     found = False
@@ -517,9 +685,9 @@ async def razvod(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if found:
         save_json(DATA_FILE, marriages)
-        await msg.reply_text("Р Р°Р·РІРѕРґ РІС‹РїРѕР»РЅРµРЅ")
+        await msg.reply_text("Р азвод выполнен")
     else:
-        await msg.reply_text("РўС‹ РЅРµ РІ Р±СЂР°РєРµ")
+        await msg.reply_text("Рўы не в бСЂаке")
 
 
 async def anniversary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -641,7 +809,7 @@ async def alyans(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     mentioned = get_mentioned_users(msg.text)
 
     if len(mentioned) < 1 or len(mentioned) > 80:
-        await msg.reply_text("РђР»СЊСЏРЅСЃ: 1-80 С‡РµР»РѕРІРµРє")
+        await msg.reply_text("Альянс: 1-80 человек")
         return
 
     marriages.setdefault(chat_id, [])
@@ -649,7 +817,7 @@ async def alyans(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         {"type": "union", "members": mentioned, "date": datetime.now().isoformat()}
     )
     save_json(DATA_FILE, marriages)
-    await msg.reply_text("РђР»СЊСЏРЅСЃ: " + ", ".join([f"@{u}" for u in mentioned]))
+    await msg.reply_text("Альянс: " + ", ".join([f"@{u}" for u in mentioned]))
 
 
 async def vragi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -658,7 +826,7 @@ async def vragi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     mentioned = get_mentioned_users(msg.text)
 
     if len(mentioned) < 2:
-        await msg.reply_text("РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ: /vragi @user1 @user2")
+        await msg.reply_text("Рспользованёе: /vragi @user1 @user2")
         return
 
     marriages.setdefault(chat_id, [])
@@ -666,7 +834,7 @@ async def vragi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         {"type": "enemies", "members": mentioned, "date": datetime.now().isoformat()}
     )
     save_json(DATA_FILE, marriages)
-    await msg.reply_text("Р’СЂР°РіРё: " + ", ".join([f"@{u}" for u in mentioned]))
+    await msg.reply_text("ВСЂагё: " + ", ".join([f"@{u}" for u in mentioned]))
 
 
 async def braki(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -676,9 +844,9 @@ async def braki(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     lines = [f"{' вќ¤пёЏ '.join([f'@{u}' for u in m['members']])}" for m in records if m.get("type") == "marriage"]
     if not lines:
-        await msg.reply_text("РќРµС‚ Р±СЂР°РєРѕРІ")
+        await msg.reply_text("Рќет бСЂаков")
         return
-    await msg.reply_text("Р‘СЂР°РєРё:\n" + "\n".join(lines))
+    await msg.reply_text("БСЂакё:\n" + "\n".join(lines))
 
 
 async def soyuzy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -690,11 +858,11 @@ async def soyuzy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     enemies = [f"{', '.join([f'@{u}' for u in m['members']])}" for m in records if m.get("type") == "enemies"]
 
     if not unions and not enemies:
-        await msg.reply_text("РќРµС‚ СЃРѕСЋР·РѕРІ Рё РІСЂР°РіРѕРІ")
+        await msg.reply_text("Рќет союзов ё вСЂагов")
         return
 
-    text = "РђР»СЊСЏРЅСЃС‹:\n" + ("\n".join(unions) if unions else "РЅРµС‚")
-    text += "\n\nР’СЂР°РіРё:\n" + ("\n".join(enemies) if enemies else "РЅРµС‚")
+    text = "Альянсы:\n" + ("\n".join(unions) if unions else "нет")
+    text += "\n\nВСЂагё:\n" + ("\n".join(enemies) if enemies else "нет")
     await msg.reply_text(text)
 
 
@@ -710,16 +878,16 @@ async def moisoyuz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if user not in members:
             continue
         if m.get("type") == "marriage":
-            lines.append("Р‘СЂР°Рє: " + " вќ¤пёЏ ".join([f"@{u}" for u in members]))
+            lines.append("БСЂак: " + " вќ¤пёЏ ".join([f"@{u}" for u in members]))
         elif m.get("type") == "union":
-            lines.append("РђР»СЊСЏРЅСЃ: " + ", ".join([f"@{u}" for u in members]))
+            lines.append("Альянс: " + ", ".join([f"@{u}" for u in members]))
         elif m.get("type") == "enemies":
-            lines.append("Р’СЂР°РіРё: " + ", ".join([f"@{u}" for u in members]))
+            lines.append("ВСЂагё: " + ", ".join([f"@{u}" for u in members]))
 
     if not lines:
-        await msg.reply_text("РўС‹ РЅРёРіРґРµ РЅРµ СЃРѕСЃС‚РѕРёС€СЊ")
+        await msg.reply_text("Рўы нёгде не состоёшь")
         return
-    await msg.reply_text(f"РЎРїРёСЃРѕРє РґР»СЏ @{user}:\n" + "\n".join(lines))
+    await msg.reply_text(f"Спёсок для @{user}:\n" + "\n".join(lines))
 
 
 async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -910,16 +1078,16 @@ async def pvpstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     s = duel_stats[user]
     await msg.reply_text(
         f"PvP @{user}\n"
-        f"РџРѕР±РµРґС‹: {s['wins']}\n"
-        f"РџРѕСЂР°Р¶РµРЅРёСЏ: {s['losses']}\n"
-        f"РќРёС‡СЊРё: {s['draws']}"
+        f"Победы: {s['wins']}\n"
+        f"ПоСЂаженёя: {s['losses']}\n"
+        f"Рќёчьё: {s['draws']}"
     )
 
 
 async def pvptop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     if not duel_stats:
-        await msg.reply_text("РџРѕРєР° РЅРµС‚ PvP-РґР°РЅРЅС‹С…")
+        await msg.reply_text("Пока нет PvP-данных")
         return
 
     ranking = sorted(
@@ -928,7 +1096,7 @@ async def pvptop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reverse=True,
     )[:10]
 
-    lines = ["РўРѕРї PvP (РїРѕ РїРѕР±РµРґР°Рј):"]
+    lines = ["Рўоп PvP (по победам):"]
     for i, (user, s) in enumerate(ranking, start=1):
         lines.append(f"{i}. @{user} - W:{s.get('wins', 0)} L:{s.get('losses', 0)} D:{s.get('draws', 0)}")
     await msg.reply_text("\n".join(lines))
@@ -940,17 +1108,17 @@ async def war(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     mentioned = get_mentioned_users(msg.text)
 
     if len(mentioned) != 1:
-        await msg.reply_text("РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ: /war @user")
+        await msg.reply_text("Рспользованёе: /war @user")
         return
 
     defender = mentioned[0]
     if defender == attacker:
-        await msg.reply_text("РќРµР»СЊР·СЏ РІРѕРµРІР°С‚СЊ СЃ СЃРѕР±РѕР№")
+        await msg.reply_text("Рќельзя воевать с собой")
         return
 
     hp_a = 120
     hp_d = 120
-    log_lines = [f"Р’РѕР№РЅР°: @{attacker} vs @{defender}"]
+    log_lines = [f"Война: @{attacker} vs @{defender}"]
     for round_num in range(1, 6):
         if hp_a <= 0 or hp_d <= 0:
             break
@@ -959,7 +1127,7 @@ async def war(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         hp_d -= dmg_a
         hp_a -= dmg_d
         log_lines.append(
-            f"Р Р°СѓРЅРґ {round_num}: @{attacker} -{dmg_a} HP РІСЂР°РіР°, @{defender} -{dmg_d} HP РІСЂР°РіР° | "
+            f"Р аунд {round_num}: @{attacker} -{dmg_a} HP вСЂага, @{defender} -{dmg_d} HP вСЂага | "
             f"HP: {max(hp_a,0)}:{max(hp_d,0)}"
         )
 
@@ -969,15 +1137,15 @@ async def war(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if hp_a == hp_d:
         war_stats[attacker]["draws"] += 1
         war_stats[defender]["draws"] += 1
-        log_lines.append("РС‚РѕРі: РЅРёС‡СЊСЏ")
+        log_lines.append("Ртог: нёчья")
     elif hp_a > hp_d:
         war_stats[attacker]["wins"] += 1
         war_stats[defender]["losses"] += 1
-        log_lines.append(f"РС‚РѕРі: РїРѕР±РµРґРёР» @{attacker}")
+        log_lines.append(f"Ртог: победёл @{attacker}")
     else:
         war_stats[defender]["wins"] += 1
         war_stats[attacker]["losses"] += 1
-        log_lines.append(f"РС‚РѕРі: РїРѕР±РµРґРёР» @{defender}")
+        log_lines.append(f"Ртог: победёл @{defender}")
 
     save_json(WAR_STATS_FILE, war_stats)
     await msg.reply_text("\n".join(log_lines))
@@ -992,17 +1160,17 @@ async def warstats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     ensure_stat_user(war_stats, user)
     s = war_stats[user]
     await msg.reply_text(
-        f"Р’РѕР№РЅС‹ @{user}\n"
-        f"РџРѕР±РµРґС‹: {s['wins']}\n"
-        f"РџРѕСЂР°Р¶РµРЅРёСЏ: {s['losses']}\n"
-        f"РќРёС‡СЊРё: {s['draws']}"
+        f"Войны @{user}\n"
+        f"Победы: {s['wins']}\n"
+        f"ПоСЂаженёя: {s['losses']}\n"
+        f"Рќёчьё: {s['draws']}"
     )
 
 
 async def wartop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     if not war_stats:
-        await msg.reply_text("РџРѕРєР° РЅРµС‚ РґР°РЅРЅС‹С… РїРѕ РІРѕР№РЅР°Рј")
+        await msg.reply_text("Пока нет данных по войнам")
         return
 
     ranking = sorted(
@@ -1011,7 +1179,7 @@ async def wartop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reverse=True,
     )[:10]
 
-    lines = ["РўРѕРї РІРѕР№РЅ (РїРѕ РїРѕР±РµРґР°Рј):"]
+    lines = ["Рўоп войн (по победам):"]
     for i, (user, s) in enumerate(ranking, start=1):
         lines.append(f"{i}. @{user} - W:{s.get('wins', 0)} L:{s.get('losses', 0)} D:{s.get('draws', 0)}")
     await msg.reply_text("\n".join(lines))
@@ -1120,15 +1288,15 @@ async def raid_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     chat_id = str(msg.chat_id)
     state = raid_states.get(chat_id, {})
     if state.get("active"):
-        await msg.reply_text("Р РµР№Рґ СѓР¶Рµ РёРґРµС‚. РСЃРїРѕР»СЊР·СѓР№С‚Рµ /raid_hit")
+        await msg.reply_text("Р ейд уже ёдет. Рспользуйте /raid_hit")
         return
 
-    boss_names = ["Р”СЂР°РєРѕРЅ", "РўРёС‚Р°РЅ", "Р›РёС‡", "Р“РёРґСЂР°", "Р“РѕР»РµРј"]
+    boss_names = ["ДСЂакон", "Рўётан", "Лёч", "ГёдСЂа", "Голем"]
     hp = random.randint(350, 600)
     boss = random.choice(boss_names)
     raid_states[chat_id] = {"active": True, "boss": boss, "hp": hp, "max_hp": hp, "attackers": {}}
     save_json(RAID_FILE, raid_states)
-    await msg.reply_text(f"Р РµР№Рґ РЅР°С‡Р°Р»СЃСЏ!\nР‘РѕСЃСЃ: {boss}\nHP: {hp}\nР‘РµР№С‚Рµ Р±РѕСЃСЃР°: /raid_hit")
+    await msg.reply_text(f"Р ейд начался!\nБосс: {boss}\nHP: {hp}\nБейте босса: /raid_hit")
 
 
 async def raid_hit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1136,7 +1304,7 @@ async def raid_hit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = str(msg.chat_id)
     state = raid_states.get(chat_id)
     if not state or not state.get("active"):
-        await msg.reply_text("РЎРµР№С‡Р°СЃ РЅРµС‚ Р°РєС‚РёРІРЅРѕРіРѕ СЂРµР№РґР°. РљРѕРјР°РЅРґР°: /raid_start")
+        await msg.reply_text("Сейчас нет актёвного СЂейда. Команда: /raid_start")
         return
 
     user = get_user_key(msg.from_user.username, msg.from_user.id)
@@ -1150,17 +1318,17 @@ async def raid_hit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if state["hp"] > 0:
         await msg.reply_text(
-            f"@{user} РЅР°РЅРµСЃ {damage} СѓСЂРѕРЅР°.\n"
-            f"Р‘РѕСЃСЃ {state['boss']} HP: {state['hp']}/{state['max_hp']}"
+            f"@{user} нанес {damage} уСЂона.\n"
+            f"Босс {state['boss']} HP: {state['hp']}/{state['max_hp']}"
         )
         save_json(RAID_FILE, raid_states)
         return
 
     state["active"] = False
     top = sorted(attackers.items(), key=lambda x: x[1], reverse=True)[:5]
-    lines = [f"Р‘РѕСЃСЃ {state['boss']} РїРѕРІРµСЂР¶РµРЅ!"]
+    lines = [f"Босс {state['boss']} повеСЂжен!"]
     if top:
-        lines.append("РўРѕРї СѓСЂРѕРЅР°:")
+        lines.append("Рўоп уСЂона:")
         for i, (name, dmg) in enumerate(top, start=1):
             lines.append(f"{i}. @{name}: {dmg}")
 
@@ -1171,7 +1339,7 @@ async def raid_hit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     save_json(RAID_FILE, raid_states)
     save_json(DAILY_FILE, daily_rewards)
-    await msg.reply_text("\n".join(lines) + "\nРќР°РіСЂР°РґС‹ РґРѕР±Р°РІР»РµРЅС‹ РІ Р±Р°Р»Р°РЅСЃ.")
+    await msg.reply_text("\n".join(lines) + "\nРќагСЂады добавлены в баланс.")
 
 
 async def raid_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1179,14 +1347,14 @@ async def raid_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     chat_id = str(msg.chat_id)
     state = raid_states.get(chat_id)
     if not state or not state.get("active"):
-        await msg.reply_text("РђРєС‚РёРІРЅРѕРіРѕ СЂРµР№РґР° РЅРµС‚.")
+        await msg.reply_text("Актёвного СЂейда нет.")
         return
 
     attackers = state.get("attackers", {})
     top = sorted(attackers.items(), key=lambda x: x[1], reverse=True)[:3]
-    text = f"Р‘РѕСЃСЃ: {state['boss']}\nHP: {state['hp']}/{state['max_hp']}"
+    text = f"Босс: {state['boss']}\nHP: {state['hp']}/{state['max_hp']}"
     if top:
-        text += "\nРўРѕРї СѓСЂРѕРЅР°:\n" + "\n".join([f"{i}. @{u}: {d}" for i, (u, d) in enumerate(top, 1)])
+        text += "\nРўоп уСЂона:\n" + "\n".join([f"{i}. @{u}: {d}" for i, (u, d) in enumerate(top, 1)])
     await msg.reply_text(text)
 
 
@@ -1198,12 +1366,12 @@ async def raid_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reverse=True,
     )[:10]
     if not ranking:
-        await msg.reply_text("РџРѕРєР° РЅРµС‚ РґР°РЅРЅС‹С….")
+        await msg.reply_text("Пока нет данных.")
         return
 
-    lines = ["РўРѕРї РїРѕ РјРѕРЅРµС‚Р°Рј:"]
+    lines = ["Рўоп по монетам:"]
     for i, (u, c) in enumerate(ranking, start=1):
-        lines.append(f"{i}. @{u}: {c} РјРѕРЅРµС‚")
+        lines.append(f"{i}. @{u}: {c} монет")
     await msg.reply_text("\n".join(lines))
 
 
@@ -1225,7 +1393,7 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     last = entry.get("last_claim", "")
 
     if last == today:
-        await msg.reply_text(f"РЎРµРіРѕРґРЅСЏ СѓР¶Рµ РїРѕР»СѓС‡РµРЅРѕ.\nР‘Р°Р»Р°РЅСЃ: {entry.get('coins', 0)} РјРѕРЅРµС‚")
+        await msg.reply_text(f"Сегодня уже получено.\nБаланс: {entry.get('coins', 0)} монет")
         return
 
     days_diff = 99
@@ -1247,9 +1415,9 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     save_json(DAILY_FILE, daily_rewards)
 
     await msg.reply_text(
-        f"Р•Р¶РµРґРЅРµРІРЅР°СЏ РЅР°РіСЂР°РґР°: +{reward}\n"
-        f"РЎРµСЂРёСЏ: {entry['streak']} РґРЅРµР№\n"
-        f"Р‘Р°Р»Р°РЅСЃ: {entry['coins']} РјРѕРЅРµС‚"
+        f"Ежедневная нагСЂада: +{reward}\n"
+        f"СеСЂёя: {entry['streak']} дней\n"
+        f"Баланс: {entry['coins']} монет"
     )
 
 
@@ -1260,8 +1428,8 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = mentioned[0] if mentioned else caller
     entry = daily_rewards.setdefault(user, {"coins": 0, "streak": 0, "last_claim": ""})
     await msg.reply_text(
-        f"Р‘Р°Р»Р°РЅСЃ @{user}: {entry.get('coins', 0)} РјРѕРЅРµС‚\n"
-        f"РЎРµСЂРёСЏ daily: {entry.get('streak', 0)}"
+        f"Баланс @{user}: {entry.get('coins', 0)} монет\n"
+        f"СеСЂёя daily: {entry.get('streak', 0)}"
     )
 
 
@@ -1278,13 +1446,13 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = get_user_key(msg.from_user.username, msg.from_user.id)
 
     if not context.args:
-        await msg.reply_text("РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ: /buy item_id [РєРѕР»-РІРѕ]")
+        await msg.reply_text("Рспользованёе: /buy item_id [кол-во]")
         return
 
     item_id = context.args[0].lower().strip()
     item = SHOP_ITEMS.get(item_id)
     if not item:
-        await msg.reply_text("РўР°РєРѕРіРѕ РїСЂРµРґРјРµС‚Р° РЅРµС‚. РЎРїРёСЃРѕРє: /shop")
+        await msg.reply_text("Рўакого пСЂедмета нет. Спёсок: /shop")
         return
 
     qty = 1
@@ -1292,18 +1460,18 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             qty = int(context.args[1])
         except ValueError:
-            await msg.reply_text("РљРѕР»РёС‡РµСЃС‚РІРѕ РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ С‡РёСЃР»РѕРј")
+            await msg.reply_text("Колёчество должно быть чёслом")
             return
 
     if qty < 1 or qty > 99:
-        await msg.reply_text("РљРѕР»РёС‡РµСЃС‚РІРѕ: РѕС‚ 1 РґРѕ 99")
+        await msg.reply_text("Колёчество: от 1 до 99")
         return
 
     cost = item["price"] * qty
     wallet = ensure_wallet(user)
     coins = int(wallet.get("coins", 0))
     if coins < cost:
-        await msg.reply_text(f"РќРµ С…РІР°С‚Р°РµС‚ РјРѕРЅРµС‚. РќСѓР¶РЅРѕ: {cost}, Сѓ С‚РµР±СЏ: {coins}")
+        await msg.reply_text(f"Рќе хватает монет. Рќужно: {cost}, у тебя: {coins}")
         return
 
     wallet["coins"] = coins - cost
@@ -1313,9 +1481,9 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     save_json(DAILY_FILE, daily_rewards)
     save_json(INVENTORY_FILE, inventories)
     await msg.reply_text(
-        f"РџРѕРєСѓРїРєР° СѓСЃРїРµС€РЅР°: {item['name']} x{qty}\n"
-        f"РЎРїРёСЃР°РЅРѕ: {cost}\n"
-        f"Р‘Р°Р»Р°РЅСЃ: {wallet['coins']}"
+        f"Покупка успешна: {item['name']} x{qty}\n"
+        f"Спёсано: {cost}\n"
+        f"Баланс: {wallet['coins']}"
     )
 
 
@@ -1327,10 +1495,10 @@ async def inventory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     inv = ensure_inventory(user)
     if not inv:
-        await msg.reply_text(f"РРЅРІРµРЅС‚Р°СЂСЊ @{user} РїСѓСЃС‚")
+        await msg.reply_text(f"РнвентаСЂь @{user} пуст")
         return
 
-    lines = [f"РРЅРІРµРЅС‚Р°СЂСЊ @{user}:"]
+    lines = [f"РнвентаСЂь @{user}:"]
     for item_id, qty in sorted(inv.items()):
         item = SHOP_ITEMS.get(item_id, {"name": item_id})
         lines.append(f"- {item['name']} ({item_id}): x{qty}")
@@ -1455,7 +1623,50 @@ def build_application(token: str) -> Application:
     app.add_handler(CommandHandler("mops_on", mops_on))
     app.add_handler(CommandHandler("mops_off", mops_off))
     app.add_handler(CommandHandler("mops_status", mops_status))
+
+    # Мопс-Фарделька - основные команды
+    app.add_handler(CommandHandler("mops_help", mops_fardelka_help))
+    app.add_handler(CommandHandler("help_mops", mops_fardelka_help))
+    app.add_handler(CommandHandler("привет", mops_greet))
+    app.add_handler(CommandHandler("приветики", mops_greet))
+    app.add_handler(CommandHandler("хау", mops_greet))
+    app.add_handler(CommandHandler("пока", mops_farewell))
+    app.add_handler(CommandHandler("бай", mops_farewell))
+    app.add_handler(CommandHandler("спасибо", mops_thanks))
+    app.add_handler(CommandHandler("благодарю", mops_thanks))
+
+    # Развлечения
+    app.add_handler(CommandHandler("шутка", mops_joke))
+    app.add_handler(CommandHandler("анекдот", mops_joke))
+    app.add_handler(CommandHandler("цитата", mops_quote))
+    app.add_handler(CommandHandler("факт", mops_fact))
+    app.add_handler(CommandHandler("интересное", mops_fact))
+    app.add_handler(CommandHandler("комплимент", mops_compliment))
+    app.add_handler(CommandHandler("оскорбление", mops_insult))
+
+    # Гадания
+    app.add_handler(CommandHandler("шар", mops_8ball))
+    app.add_handler(CommandHandler("ball", mops_8ball))
+    app.add_handler(CommandHandler("монетка", mops_coin))
+    app.add_handler(CommandHandler("орел", mops_coin))
+    app.add_handler(CommandHandler("решка", mops_coin))
+    app.add_handler(CommandHandler("кубик", mops_dice))
+    app.add_handler(CommandHandler("d6", mops_dice))
+    app.add_handler(CommandHandler("число", mops_random))
+    app.add_handler(CommandHandler("рандом", mops_random))
+
+    # Разное
+    app.add_handler(CommandHandler("гороскоп", mops_horoscope))
+    app.add_handler(CommandHandler("погода", mops_weather))
+    app.add_handler(CommandHandler("love", mops_love))
+    app.add_handler(CommandHandler("кто", mops_love))
+    app.add_handler(CommandHandler("kiss", mops_kiss))
+    app.add_handler(CommandHandler("поцелуй", mops_kiss))
+    app.add_handler(CommandHandler("hug", mops_hug))
+    app.add_handler(CommandHandler("обнять", mops_hug))
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, marriage_ceremony_text))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ru_commands))
     return app
 
 
