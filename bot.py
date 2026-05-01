@@ -115,7 +115,7 @@ async def handle_ru_commands(update: Update, context: ContextTypes.DEFAULT_TYPE)
                    'мойбрак', 'моясемья', 'пвптоп', 'войнытоп', 'рейд',
                    'удар', 'слова', 'стопслова', 'мопс', 'ежедневка', 'награда']
 
-       if text in no_args:
+        if text in no_args:
             await func(update, context)
             return
 
@@ -477,7 +477,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ensure_mops_chat(chat_id)
     save_json(MOPS_FILE, mops_state)
 
-     await update.message.reply_text(
+    await update.message.reply_text(
         "Команды:\n"
         "/brak @user1 @user2 ... (2-67)\n"
         "/razvod [@user]\n"
@@ -614,7 +614,7 @@ async def marriage_ceremony_text(update: Update, context: ContextTypes.DEFAULT_T
     else:
         return
 
-     pending_marriages[key] = request
+    pending_marriages[key] = request
     a_ok = request.get("a_ok") == "1"
     b_ok = request.get("b_ok") == "1"
 
