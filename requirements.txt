@@ -1,0 +1,4 @@
+psutil
+python-telegram-bot
+
+Pillow
